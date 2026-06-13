@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -e
 
 GREEN='\033[0;32m'
@@ -26,50 +25,73 @@ echo -e "${GREEN}====================================${NC}"
 echo
 
 if [ "$EUID" -ne 0 ]; then
-echo -e "${RED}Please run as root${NC}"
-exit 1
+    echo -e "${RED}Please run as root${NC}"
+    exit 1
 fi
 
 read -p "Enter Agent API Key: " API_KEY
+if [ -z "$API_KEY" ]; then
+    echo -e "${RED}API Key cannot be empty${NC}"
+    exit 1
+fi
 
 echo
-echo -e "${BLUE}[1/8]${NC} Updating packages..."
+echo -e "${BLUE}[1/9]${NC} Updating packages..."
 apt update
 
-echo -e "${BLUE}[2/8]${NC} Installing dependencies..."
+echo -e "${BLUE}[2/9]${NC} Installing dependencies..."
 apt install -y \
     python3 \
     python3-venv \
     python3-pip \
-    curl
+    curl \
+    gcc \
+    python3-dev \
+    net-tools
 
-echo -e "${BLUE}[3/8]${NC} Creating application directory..."
+echo -e "${BLUE}[3/9]${NC} Creating application directory..."
 mkdir -p /opt/beeny-agent
-
 cd /opt/beeny-agent
 
-echo -e "${BLUE}[4/8]${NC} Creating virtual environment..."
+echo -e "${BLUE}[4/9]${NC} Creating virtual environment..."
 if [ ! -d "venv" ]; then
-python3 -m venv venv
+    python3 -m venv venv
 fi
 
 source venv/bin/activate
 
-echo -e "${BLUE}[5/8]${NC} Downloading files..."
-curl -fsSL -o agent.py https://raw.githubusercontent.com/Beni-SHL/beeny-agent/main/agent.py
-curl -fsSL -o requirements.txt https://raw.githubusercontent.com/Beni-SHL/beeny-agent/main/requirements.txt
+echo -e "${BLUE}[5/9]${NC} Downloading files..."
 
-echo -e "${BLUE}[6/8]${NC} Installing Python packages..."
+curl -fsSL -o agent.py https://raw.githubusercontent.com/Beni-SHL/beeny-agent/main/agent.py || {
+    echo -e "${RED}Failed to download agent.py${NC}"
+    exit 1
+}
+curl -fsSL -o requirements.txt https://raw.githubusercontent.com/Beni-SHL/beeny-agent/main/requirements.txt || {
+    echo -e "${RED}Failed to download requirements.txt${NC}"
+    exit 1
+}
+
+echo -e "${BLUE}[6/9]${NC} Installing Python packages..."
 pip install --upgrade pip
 pip install -r requirements.txt
 
-echo -e "${BLUE}[7/8]${NC} Creating configuration..."
+echo -e "${BLUE}[7/9]${NC} Creating configuration..."
 cat > config.py << EOF
 AGENT_API_KEY = "$API_KEY"
 PORT = 5001
 EOF
 
-echo -e "${BLUE}[8/8]${NC} Creating systemd service..."
+if netstat -tuln | grep -q ":5001 "; then
+    echo -e "${YELLOW}Warning: Port 5001 is already in use. Agent may fail to start.${NC}"
+    read -p "Do you want to change port? (y/n): " change_port
+    if [[ "$change_port" =~ ^[Yy]$ ]]; then
+        read -p "Enter new port: " NEW_PORT
+        sed -i "s/PORT = 5001/PORT = $NEW_PORT/" config.py
+        echo -e "${GREEN}Port changed to $NEW_PORT${NC}"
+    fi
+fi
+
+echo -e "${BLUE}[8/9]${NC} Creating systemd service..."
 cat > /etc/systemd/system/beeny-agent.service << EOF
 [Unit]
 Description=Beeny Agent
@@ -79,7 +101,10 @@ After=network.target
 WorkingDirectory=/opt/beeny-agent
 ExecStart=/opt/beeny-agent/venv/bin/python /opt/beeny-agent/agent.py
 Restart=always
+RestartSec=5
 User=root
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -87,20 +112,23 @@ EOF
 
 systemctl daemon-reload
 systemctl enable beeny-agent
-systemctl restart beeny-agent
 
-sleep 3
+echo -e "${BLUE}[9/9]${NC} Starting agent..."
+systemctl restart beeny-agent
+sleep 5
 
 echo
-
 if systemctl is-active --quiet beeny-agent; then
-echo -e "${GREEN}====================================${NC}"
-echo -e "${GREEN}✓ Installation completed${NC}"
-echo -e "${GREEN}✓ Agent service is running${NC}"
-echo -e "${GREEN}✓ Node is ready${NC}"
-echo -e "${GREEN}====================================${NC}"
+    echo -e "${GREEN}====================================${NC}"
+    echo -e "${GREEN}✓ Installation completed${NC}"
+    echo -e "${GREEN}✓ Agent service is running${NC}"
+    echo -e "${GREEN}✓ Node is ready${NC}"
+    echo -e "${GREEN}====================================${NC}"
+    echo -e "${CYAN}Check logs: journalctl -u beeny-agent -f${NC}"
 else
-echo -e "${RED}Agent failed to start${NC}"
-systemctl status beeny-agent --no-pager
-exit 1
+    echo -e "${RED}Agent failed to start${NC}"
+    echo -e "${YELLOW}Showing service status and last logs:${NC}"
+    systemctl status beeny-agent --no-pager
+    journalctl -u beeny-agent -n 20 --no-pager
+    exit 1
 fi
