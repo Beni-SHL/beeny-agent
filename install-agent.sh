@@ -29,11 +29,15 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-read -p "Enter Agent API Key: " API_KEY
-if [ -z "$API_KEY" ]; then
-    echo -e "${RED}API Key cannot be empty${NC}"
-    exit 1
-fi
+# گرفتن API Key با حلقه تا خالی نباشد
+API_KEY=""
+while [ -z "$API_KEY" ]; do
+    # استفاده از /dev/tty برای اطمینان از خواندن ورودی در محیط‌های غیرتعاملی
+    read -p "Enter Agent API Key: " API_KEY < /dev/tty
+    if [ -z "$API_KEY" ]; then
+        echo -e "${RED}API Key cannot be empty. Please try again.${NC}"
+    fi
+done
 
 echo
 echo -e "${BLUE}[1/9]${NC} Updating packages..."
@@ -61,7 +65,6 @@ fi
 source venv/bin/activate
 
 echo -e "${BLUE}[5/9]${NC} Downloading files..."
-
 curl -fsSL -o agent.py https://raw.githubusercontent.com/Beni-SHL/beeny-agent/main/agent.py || {
     echo -e "${RED}Failed to download agent.py${NC}"
     exit 1
@@ -81,11 +84,12 @@ AGENT_API_KEY = "$API_KEY"
 PORT = 5001
 EOF
 
+# بررسی آزاد بودن پورت 5001
 if netstat -tuln | grep -q ":5001 "; then
     echo -e "${YELLOW}Warning: Port 5001 is already in use. Agent may fail to start.${NC}"
-    read -p "Do you want to change port? (y/n): " change_port
+    read -p "Do you want to change port? (y/n): " change_port < /dev/tty
     if [[ "$change_port" =~ ^[Yy]$ ]]; then
-        read -p "Enter new port: " NEW_PORT
+        read -p "Enter new port: " NEW_PORT < /dev/tty
         sed -i "s/PORT = 5001/PORT = $NEW_PORT/" config.py
         echo -e "${GREEN}Port changed to $NEW_PORT${NC}"
     fi
