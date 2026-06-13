@@ -37,11 +37,11 @@ echo -e "${BLUE}[1/8]${NC} Updating packages..."
 apt update
 
 echo -e "${BLUE}[2/8]${NC} Installing dependencies..."
-apt install -y 
-python3 
-python3-venv 
-python3-pip 
-curl
+apt install -y \
+    python3 \
+    python3-venv \
+    python3-pip \
+    curl
 
 echo -e "${BLUE}[3/8]${NC} Creating application directory..."
 mkdir -p /opt/beeny-agent
