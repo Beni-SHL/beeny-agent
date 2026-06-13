@@ -6,10 +6,10 @@ echo "Installing Beeny Agent..."
 
 apt update
 
-apt install -y 
-python3 
-python3-venv 
-python3-pip 
+apt install -y
+python3
+python3-venv
+python3-pip
 curl
 
 mkdir -p /opt/beeny-agent
@@ -23,14 +23,11 @@ fi
 source venv/bin/activate
 
 pip install --upgrade pip
-
 pip install flask requests
 
-curl -o agent.py 
-https://raw.githubusercontent.com/Beni-shl/beeny-agent/main/agent.py
+curl -o agent.py https://raw.githubusercontent.com/Beni-shl/beeny-agent/main/agent.py
 
-curl -o config.py 
-https://raw.githubusercontent.com/Beni-shl/beeny-agent/main/config.py.example
+curl -o config.py https://raw.githubusercontent.com/Beni-shl/beeny-agent/main/config.py.example
 
 cat >/etc/systemd/system/beeny-agent.service <<EOF
 [Unit]
