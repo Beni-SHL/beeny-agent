@@ -34,9 +34,16 @@ echo -e "${C_BLUE}[⚙] Starting Installation Process...${C_NC}\n"
 
 # --- Step 1 ---
 echo -ne "${C_YELLOW}➜ [1/5] Installing Dependencies (OpenVPN, Python)... ${C_NC}"
+
+# جلوگیری از پرسیدن سوال حین نصب پکیج‌ها
+export DEBIAN_FRONTEND=noninteractive
+echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+
 apt-get update -y > /dev/null 2>&1
-apt-get install -y openvpn python3 python3-pip iptables iptables-persistent net-tools curl > /dev/null 2>&1
+apt-get install -y -qq openvpn python3 python3-pip iptables iptables-persistent net-tools curl > /dev/null 2>&1
 pip3 install flask requests --break-system-packages > /dev/null 2>&1 || pip3 install flask requests > /dev/null 2>&1
+
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
 # --- Step 2 ---
