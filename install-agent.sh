@@ -1,5 +1,4 @@
 #!/bin/bash
-# حذف دستور set -e برای جلوگیری از توقف اسکریپت روی اخطارهای جزئی
 
 C_RED='\033[0;31m'
 C_GREEN='\033[0;32m'
@@ -23,14 +22,15 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-export DEBIAN_FRONTEND=noninteractive
-
 echo -ne "${C_YELLOW}➜ [1/5] Installing Dependencies (OpenVPN, Python)... ${C_NC}"
+export DEBIAN_FRONTEND=noninteractive
+apt-get remove -y needrestart > /dev/null 2>&1 || true
 apt-get update -y > /dev/null 2>&1
-apt-get install -y debconf-utils > /dev/null 2>&1 || true
+
 echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections 2>/dev/null || true
 echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections 2>/dev/null || true
-apt-get install -yq openvpn python3 python3-pip iptables iptables-persistent net-tools curl > /dev/null 2>&1
+
+apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" openvpn python3 python3-pip iptables iptables-persistent net-tools curl > /dev/null 2>&1
 pip3 install flask requests --break-system-packages > /dev/null 2>&1 || pip3 install flask requests > /dev/null 2>&1
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
@@ -38,7 +38,6 @@ echo -ne "${C_YELLOW}➜ [2/5] Configuring Network Routing (NAT)... ${C_NC}"
 echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-beeny-vpn.conf
 sysctl -p /etc/sysctl.d/99-beeny-vpn.conf > /dev/null 2>&1
 
-# پیدا کردن هوشمندانه‌تر اینترفیس شبکه
 INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
 if [ -n "$INTERFACE" ]; then
     iptables -t nat -A POSTROUTING -o "$INTERFACE" -j MASQUERADE || true
@@ -48,13 +47,9 @@ fi
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
 echo -ne "${C_YELLOW}➜ [3/5] Setting up Directories & API Key... ${C_NC}"
-mkdir -p /opt/beeny-agent
-mkdir -p /etc/openvpn/server
-mkdir -p /etc/openvpn/users
+mkdir -p /opt/beeny-agent /etc/openvpn/server /etc/openvpn/users
 API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
-cat << EOF > /opt/beeny-agent/config.py
-AGENT_API_KEY = "$API_KEY"
-EOF
+echo "AGENT_API_KEY = \"$API_KEY\"" > /opt/beeny-agent/config.py
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
 echo -ne "${C_YELLOW}➜ [4/5] Writing Agent Script... ${C_NC}"
@@ -115,7 +110,7 @@ EOF
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
 echo -ne "${C_YELLOW}➜ [5/5] Starting Systemd Service... ${C_NC}"
-cat << EOF > /etc/systemd/system/beeny-agent.service
+cat << 'EOF' > /etc/systemd/system/beeny-agent.service
 [Unit]
 Description=Beeny Node Agent
 After=network.target
@@ -129,6 +124,7 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
+
 systemctl daemon-reload > /dev/null 2>&1
 systemctl enable --now beeny-agent > /dev/null 2>&1
 echo -e "${C_GREEN}✔ Done${C_NC}"
