@@ -22,22 +22,38 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-echo -ne "${C_YELLOW}➜ [1/5] Installing Dependencies (OpenVPN, Python)... ${C_NC}"
+# ================= پرسش از کاربر =================
+echo -e "${C_CYAN}╭────────────────────────────────────────────────────────╮${C_NC}"
+echo -e "${C_CYAN}│${C_NC} ${BOLD}Node Configuration Setup${C_NC}                               ${C_CYAN}│${C_NC}"
+echo -e "${C_CYAN}╰────────────────────────────────────────────────────────╯${C_NC}"
+
+read -p "🌐 Enter Domain (Leave empty to use Auto IP): " USER_DOMAIN
+read -p "🔌 Enter Port (Press Enter for default 5001): " USER_PORT
+
+USER_PORT=${USER_PORT:-5001}
+
+if [ -z "$USER_DOMAIN" ]; then
+    SERVER_IP=$(curl -s https://api.ipify.org || echo "YOUR_SERVER_IP")
+    NODE_ADDRESS=$SERVER_IP
+else
+    NODE_ADDRESS=$USER_DOMAIN
+fi
+echo -e "\n${C_GREEN}✔ Configuration Saved. Starting Installation...${C_NC}\n"
+# ===================================================
+
+echo -ne "${C_YELLOW}➜ [1/6] Installing Dependencies (OpenVPN, Python)... ${C_NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt-get remove -y needrestart > /dev/null 2>&1 || true
 apt-get update -y > /dev/null 2>&1
-
 echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections 2>/dev/null || true
 echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections 2>/dev/null || true
-
 apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" openvpn python3 python3-pip iptables iptables-persistent net-tools curl > /dev/null 2>&1
 pip3 install flask requests --break-system-packages > /dev/null 2>&1 || pip3 install flask requests > /dev/null 2>&1
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
-echo -ne "${C_YELLOW}➜ [2/5] Configuring Network Routing (NAT)... ${C_NC}"
+echo -ne "${C_YELLOW}➜ [2/6] Configuring Network Routing (NAT)... ${C_NC}"
 echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-beeny-vpn.conf
 sysctl -p /etc/sysctl.d/99-beeny-vpn.conf > /dev/null 2>&1
-
 INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
 if [ -n "$INTERFACE" ]; then
     iptables -t nat -A POSTROUTING -o "$INTERFACE" -j MASQUERADE || true
@@ -46,16 +62,21 @@ if [ -n "$INTERFACE" ]; then
 fi
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
-echo -ne "${C_YELLOW}➜ [3/5] Setting up Directories & API Key... ${C_NC}"
+echo -ne "${C_YELLOW}➜ [3/6] Setting up Directories & Config... ${C_NC}"
 mkdir -p /opt/beeny-agent /etc/openvpn/server /etc/openvpn/users
 API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
-echo "AGENT_API_KEY = \"$API_KEY\"" > /opt/beeny-agent/config.py
+
+cat << EOF > /opt/beeny-agent/config.py
+AGENT_API_KEY = "$API_KEY"
+AGENT_PORT = $USER_PORT
+AGENT_HOST = "$NODE_ADDRESS"
+EOF
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
-echo -ne "${C_YELLOW}➜ [4/5] Writing Agent Script... ${C_NC}"
+echo -ne "${C_YELLOW}➜ [4/6] Writing Agent Script... ${C_NC}"
 cat << 'EOF' > /opt/beeny-agent/agent.py
 from flask import Flask, request, jsonify
-from config import AGENT_API_KEY
+from config import AGENT_API_KEY, AGENT_PORT
 import subprocess
 import os
 
@@ -105,11 +126,11 @@ def install_cert():
         return jsonify({"success": False, "error": str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5001)
+    app.run(host="0.0.0.0", port=AGENT_PORT)
 EOF
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
-echo -ne "${C_YELLOW}➜ [5/5] Starting Systemd Service... ${C_NC}"
+echo -ne "${C_YELLOW}➜ [5/6] Starting Systemd Service... ${C_NC}"
 cat << 'EOF' > /etc/systemd/system/beeny-agent.service
 [Unit]
 Description=Beeny Node Agent
@@ -124,16 +145,62 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-
 systemctl daemon-reload > /dev/null 2>&1
 systemctl enable --now beeny-agent > /dev/null 2>&1
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
-SERVER_IP=$(curl -s https://api.ipify.org || echo "YOUR_SERVER_IP")
+echo -ne "${C_YELLOW}➜ [6/6] Creating Node Manager Menu... ${C_NC}"
+cat << 'EOF' > /usr/local/bin/beeny
+#!/bin/bash
+clear
+API=$(grep AGENT_API_KEY /opt/beeny-agent/config.py | cut -d'"' -f2)
+PORT=$(grep AGENT_PORT /opt/beeny-agent/config.py | cut -d'=' -f2 | tr -d ' ')
+HOST=$(grep AGENT_HOST /opt/beeny-agent/config.py | cut -d'"' -f2)
+
+echo -e "\033[0;36m====================================\033[0m"
+echo -e "\033[1m  🛡️  Beeny Node Agent Menu\033[0m"
+echo -e "\033[0;36m====================================\033[0m"
+echo -e "1. 🔑 Show Connection Info (API Key)"
+echo -e "2. 🔌 Change Port"
+echo -e "3. 🌐 Change Domain/IP"
+echo -e "4. 🔄 Restart Agent Service"
+echo -e "5. ❌ Exit"
+echo -e "------------------------------------"
+read -p "Select an option [1-5]: " opt
+
+case $opt in
+    1)
+        echo -e "\n\033[0;32mAddress  :\033[0m $HOST"
+        echo -e "\033[0;32mPort     :\033[0m $PORT"
+        echo -e "\033[0;32mAPI Key  :\033[0m $API\n"
+        ;;
+    2)
+        read -p "Enter new port: " newp
+        sed -i "s/AGENT_PORT = .*/AGENT_PORT = $newp/" /opt/beeny-agent/config.py
+        systemctl restart beeny-agent
+        echo -e "\033[0;32m✔ Port changed to $newp and service restarted!\033[0m"
+        ;;
+    3)
+        read -p "Enter new Domain/IP: " newd
+        sed -i "s/AGENT_HOST = .*/AGENT_HOST = \"$newd\"/" /opt/beeny-agent/config.py
+        echo -e "\033[0;32m✔ Domain updated! (Change it in Master Panel as well)\033[0m"
+        ;;
+    4)
+        systemctl restart beeny-agent
+        echo -e "\033[0;32m✔ Agent Restarted Successfully!\033[0m"
+        ;;
+    5) exit 0 ;;
+    *) echo "Invalid option" ;;
+esac
+EOF
+chmod +x /usr/local/bin/beeny
+echo -e "${C_GREEN}✔ Done${C_NC}"
+
 echo -e "\n${C_GREEN}${BOLD}🎉 Installation Completed Successfully!${C_NC}"
 echo -e "${C_CYAN}╭────────────────────────────────────────────────────────╮${C_NC}"
 echo -e "${C_CYAN}│${C_NC}  ${C_PURPLE}Add this Node to your Beeny Central Panel:${C_NC}            ${C_CYAN}│${C_NC}"
-echo -e "${C_CYAN}│${C_NC}  ${BOLD}IP Address :${C_NC} ${C_YELLOW}$SERVER_IP${C_NC}                             ${C_CYAN}│${C_NC}"
+echo -e "${C_CYAN}│${C_NC}  ${BOLD}Address    :${C_NC} ${C_YELLOW}$NODE_ADDRESS${C_NC}                             ${C_CYAN}│${C_NC}"
+echo -e "${C_CYAN}│${C_NC}  ${BOLD}Port       :${C_NC} $USER_PORT                                     ${C_CYAN}│${C_NC}"
 echo -e "${C_CYAN}│${C_NC}  ${BOLD}API Key    :${C_NC} ${C_GREEN}$API_KEY${C_NC} ${C_CYAN}│${C_NC}"
-echo -e "${C_CYAN}│${C_NC}  ${BOLD}Port       :${C_NC} 5001                                     ${C_CYAN}│${C_NC}"
-echo -e "${C_CYAN}╰────────────────────────────────────────────────────────╯${C_NC}\n"
+echo -e "${C_CYAN}╰────────────────────────────────────────────────────────╯${C_NC}"
+echo -e "${C_YELLOW}💡 Tip: Type ${BOLD}'beeny'${C_NC}${C_YELLOW} anytime in this terminal to open the manager menu.${C_NC}\n"
