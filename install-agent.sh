@@ -1,5 +1,6 @@
 #!/bin/bash
 
+# ─── رنگ‌ها ─────────────────────────────────────
 C_RED='\033[0;31m'
 C_GREEN='\033[0;32m'
 C_CYAN='\033[0;36m'
@@ -7,22 +8,63 @@ C_YELLOW='\033[1;33m'
 C_PURPLE='\033[0;35m'
 C_NC='\033[0m'
 BOLD='\033[1m'
+BLINK='\033[5m'
 
+# ─── توابع انیمیشنی ────────────────────────────
+spinner() {
+    local pid=$1
+    local delay=0.1
+    local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    while kill -0 $pid 2>/dev/null; do
+        for ((i=0; i<${#spin}; i++)); do
+            printf "\r   ${C_CYAN}%s${C_NC}  Processing..." "${spin:$i:1}"
+            sleep $delay
+        done
+    done
+    printf "\r   ${C_GREEN}✓${C_NC} Done           \n"
+}
+
+progress_bar() {
+    local cur=$1
+    local total=$2
+    local pct=$((100 * cur / total))
+    local fill=$((pct / 2))
+    local empty=$((50 - fill))
+    printf "\r["
+    for ((i=0; i<fill; i++)); do printf "█"; done
+    for ((i=0; i<empty; i++)); do printf "░"; done
+    printf "] %3d%%" "$pct"
+}
+
+typewriter() {
+    local text="$1"
+    local delay=0.02
+    for ((i=0; i<${#text}; i++)); do
+        printf "%s" "${text:$i:1}"
+        sleep $delay
+    done
+    echo
+}
+
+# ─── پاکسازی و بنر ──────────────────────────────
 clear
-echo -e "${C_CYAN}${BOLD}  ____  ______ ______ _   _ __     __"
-echo " |  _ \|  ____|  ____| \ | |\ \   / /"
-echo " | |_) | |__  | |__  |  \| | \ \_/ / "
-echo " |  _ <|  __| |  __| | . \` |  \   /  "
-echo " | |_) | |____| |____| |\  |   | |   "
-echo " |____/|______|______|_| \_|   |_|   ${C_NC}"
-echo -e "${C_PURPLE}${BOLD}✦✦✦ BEENY NODE AGENT AUTO-INSTALLER ✦✦✦${C_NC}\n"
+echo -e "${C_CYAN}${BOLD}"
+typewriter "  ____  ______ ______ _   _ __     __"
+typewriter " |  _ \|  ____|  ____| \ | |\ \   / /"
+typewriter " | |_) | |__  | |__  |  \| | \ \_/ / "
+typewriter " |  _ <|  __| |  __| | . \` |  \   /  "
+typewriter " | |_) | |____| |____| |\  |   | |   "
+typewriter " |____/|______|______|_| \_|   |_|   ${C_NC}"
+echo -e "${C_PURPLE}${BOLD}${BLINK}✦✦✦ BEENY NODE AGENT AUTO-INSTALLER ✦✦✦${C_NC}\n"
+sleep 1
 
+# ─── بررسی روت ──────────────────────────────────
 if [ "$EUID" -ne 0 ]; then
     echo -e "${C_RED}❌ Error: Please run as root!${C_NC}"
     exit 1
 fi
 
-# ================= پرسش از کاربر =================
+# ─── پرسش از کاربر ──────────────────────────────
 echo -e "${C_CYAN}╭────────────────────────────────────────────────────────╮${C_NC}"
 echo -e "${C_CYAN}│${C_NC} ${BOLD}Node Configuration Setup${C_NC}                               ${C_CYAN}│${C_NC}"
 echo -e "${C_CYAN}╰────────────────────────────────────────────────────────╯${C_NC}"
@@ -39,55 +81,76 @@ else
     NODE_ADDRESS=$USER_DOMAIN
 fi
 echo -e "\n${C_GREEN}✔ Configuration Saved. Starting Installation...${C_NC}\n"
-# ===================================================
+sleep 1
 
-echo -ne "${C_YELLOW}➜ [1/6] Installing Dependencies (OpenVPN, Python)... ${C_NC}"
-export DEBIAN_FRONTEND=noninteractive
-apt-get remove -y needrestart > /dev/null 2>&1 || true
-apt-get update -y > /dev/null 2>&1
+# ─── مراحل نصب (۶ مرحله) ────────────────────────
+TOTAL_STEPS=6
+STEP=0
 
-# ساخت پیش‌دستانه پوشه‌ها و فایل خالی برای دور زدن باگ نصب apt
-mkdir -p /etc/openvpn/server /etc/openvpn/ccd /etc/openvpn/users
-touch /etc/openvpn/server/server.conf
+# مرحله ۱: پیش‌نیازها
+((STEP++))
+echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Installing Dependencies (OpenVPN, Python)..."
+progress_bar $STEP $TOTAL_STEPS
+echo
+(
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get remove -y needrestart > /dev/null 2>&1 || true
+    apt-get update -y > /dev/null 2>&1
+    mkdir -p /etc/openvpn/server /etc/openvpn/ccd /etc/openvpn/users
+    touch /etc/openvpn/server/server.conf
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections 2>/dev/null || true
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections 2>/dev/null || true
+    apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" \
+        openvpn python3 python3-pip iptables iptables-persistent net-tools curl > /dev/null 2>&1
+    pip3 install flask requests --break-system-packages > /dev/null 2>&1 || \
+        pip3 install flask requests > /dev/null 2>&1
+) &
+spinner $!
 
-echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections 2>/dev/null || true
-echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections 2>/dev/null || true
+# مرحله ۲: شبکه و فایروال
+((STEP++))
+echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Configuring Network Routing & Firewall..."
+progress_bar $STEP $TOTAL_STEPS
+echo
+(
+    echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-beeny-vpn.conf
+    sysctl -p /etc/sysctl.d/99-beeny-vpn.conf > /dev/null 2>&1
+    INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
+    if [ -n "$INTERFACE" ]; then
+        iptables -t nat -F POSTROUTING || true
+        iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$INTERFACE" -j MASQUERADE || true
+        iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT || true
+        iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT || true
+    fi
+    iptables -I INPUT -p tcp --dport "$USER_PORT" -j ACCEPT || true
+    iptables-save > /etc/iptables/rules.v4 || true
+    netfilter-persistent save > /dev/null 2>&1 || true
+) &
+spinner $!
 
-# نصب پکیج‌ها (حالا بدون خطا نصب کامل میشه)
-apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" openvpn python3 python3-pip iptables iptables-persistent net-tools curl > /dev/null 2>&1
-pip3 install flask requests --break-system-packages > /dev/null 2>&1 || pip3 install flask requests > /dev/null 2>&1
-echo -e "${C_GREEN}✔ Done${C_NC}"
-
-echo -ne "${C_YELLOW}➜ [2/6] Configuring Network Routing & Firewall... ${C_NC}"
-echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-beeny-vpn.conf
-sysctl -p /etc/sysctl.d/99-beeny-vpn.conf > /dev/null 2>&1
-
-INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
-if [ -n "$INTERFACE" ]; then
-    iptables -t nat -F POSTROUTING || true
-    iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$INTERFACE" -j MASQUERADE || true
-    iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT || true
-    iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT || true
-fi
-
-iptables -I INPUT -p tcp --dport "$USER_PORT" -j ACCEPT || true
-iptables-save > /etc/iptables/rules.v4 || true
-netfilter-persistent save > /dev/null 2>&1 || true
-echo -e "${C_GREEN}✔ Done${C_NC}"
-
-echo -ne "${C_YELLOW}➜ [3/6] Setting up Directories & Config... ${C_NC}"
-mkdir -p /opt/beeny-agent
-API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
-
-cat << EOF > /opt/beeny-agent/config.py
+# مرحله ۳: تنظیم پوشه و کانفیگ
+((STEP++))
+echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Setting up Directories & Config..."
+progress_bar $STEP $TOTAL_STEPS
+echo
+(
+    mkdir -p /opt/beeny-agent
+    API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+    cat << EOF > /opt/beeny-agent/config.py
 AGENT_API_KEY = "$API_KEY"
 AGENT_PORT = $USER_PORT
 AGENT_HOST = "$NODE_ADDRESS"
 EOF
-echo -e "${C_GREEN}✔ Done${C_NC}"
+) &
+spinner $!
 
-echo -ne "${C_YELLOW}➜ [4/6] Writing Agent Script... ${C_NC}"
-cat << 'EOF' > /opt/beeny-agent/agent.py
+# مرحله ۴: نوشتن Agent
+((STEP++))
+echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Writing Agent Script..."
+progress_bar $STEP $TOTAL_STEPS
+echo
+(
+    cat << 'EOF' > /opt/beeny-agent/agent.py
 from flask import Flask, request, jsonify
 from config import AGENT_API_KEY, AGENT_PORT
 import subprocess
@@ -152,10 +215,16 @@ def install_cert():
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=AGENT_PORT)
 EOF
-echo -e "${C_GREEN}✔ Done${C_NC}"
+) &
+spinner $!
 
-echo -ne "${C_YELLOW}➜ [5/6] Starting Systemd Service... ${C_NC}"
-cat << 'EOF' > /etc/systemd/system/beeny-agent.service
+# مرحله ۵: راه‌اندازی سرویس
+((STEP++))
+echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Starting Systemd Service..."
+progress_bar $STEP $TOTAL_STEPS
+echo
+(
+    cat << 'EOF' > /etc/systemd/system/beeny-agent.service
 [Unit]
 Description=Beeny Node Agent
 After=network.target
@@ -169,12 +238,18 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-systemctl daemon-reload > /dev/null 2>&1
-systemctl enable --now beeny-agent > /dev/null 2>&1
-echo -e "${C_GREEN}✔ Done${C_NC}"
+    systemctl daemon-reload > /dev/null 2>&1
+    systemctl enable --now beeny-agent > /dev/null 2>&1
+) &
+spinner $!
 
-echo -ne "${C_YELLOW}➜ [6/6] Creating Node Manager Menu... ${C_NC}"
-cat << 'EOF' > /usr/local/bin/beeny
+# مرحله ۶: منوی مدیریت
+((STEP++))
+echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Creating Node Manager Menu..."
+progress_bar $STEP $TOTAL_STEPS
+echo
+(
+    cat << 'EOF' > /usr/local/bin/beeny
 #!/bin/bash
 clear
 API=$(grep AGENT_API_KEY /opt/beeny-agent/config.py | cut -d'"' -f2)
@@ -219,9 +294,11 @@ case $opt in
     *) echo "Invalid option" ;;
 esac
 EOF
-chmod +x /usr/local/bin/beeny
-echo -e "${C_GREEN}✔ Done${C_NC}"
+    chmod +x /usr/local/bin/beeny
+) &
+spinner $!
 
+# ─── پایان نصب ──────────────────────────────────
 echo -e "\n${C_GREEN}${BOLD}🎉 Installation Completed Successfully!${C_NC}"
 echo -e "${C_CYAN}╭────────────────────────────────────────────────────────╮${C_NC}"
 echo -e "${C_CYAN}│${C_NC}  ${C_PURPLE}Add this Node to your Beeny Central Panel:${C_NC}            ${C_CYAN}│${C_NC}"
@@ -229,4 +306,4 @@ echo -e "${C_CYAN}│${C_NC}  ${BOLD}Address    :${C_NC} ${C_YELLOW}$NODE_ADDRES
 echo -e "${C_CYAN}│${C_NC}  ${BOLD}Port       :${C_NC} $USER_PORT                                     ${C_CYAN}│${C_NC}"
 echo -e "${C_CYAN}│${C_NC}  ${BOLD}API Key    :${C_NC} ${C_GREEN}$API_KEY${C_NC} ${C_CYAN}│${C_NC}"
 echo -e "${C_CYAN}╰────────────────────────────────────────────────────────╯${C_NC}"
-echo -e "${=C_YELLOW}💡 Tip: Type ${BOLD}'beeny'${C_NC}${C_YELLOW} anytime in this terminal to open the manager menu.${C_NC}\n"
+echo -e "${C_YELLOW}💡 Tip: Type ${BOLD}'beeny'${C_NC}${C_YELLOW} anytime in this terminal to open the manager menu.${C_NC}\n"
