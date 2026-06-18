@@ -38,10 +38,11 @@ def bootstrap_openvpn():
         if data.get("server_conf"):
             with open("/etc/openvpn/server/server.conf", "w") as f: f.write(data.get("server_conf"))
         
-        # فعال‌سازی و استارت سرویس با نام استاندارد اوبونتو/دبیان
-        subprocess.run(["systemctl", "daemon-reload"], check=False)
-        subprocess.run(["systemctl", "enable", "openvpn@server"], check=False)
-        subprocess.run(["systemctl", "restart", "openvpn@server"], check=False)
+
+
+        subprocess.run("systemctl daemon-reload", shell=True, check=False)
+        subprocess.run("systemctl enable openvpn-server@server", shell=True, check=False)
+        subprocess.run("systemctl restart openvpn-server@server", shell=True, check=False)
         
         return jsonify({"success": True, "message": "Bootstrap completed & OpenVPN started"})
     except Exception as e:
