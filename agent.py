@@ -39,10 +39,9 @@ def bootstrap_openvpn():
             with open("/etc/openvpn/server/server.conf", "w") as f: f.write(data.get("server_conf"))
         
 
-
-        subprocess.run("systemctl daemon-reload", shell=True, check=False)
-        subprocess.run("systemctl enable openvpn-server@server", shell=True, check=False)
-        subprocess.run("systemctl restart openvpn-server@server", shell=True, check=False)
+        subprocess.run(["/usr/bin/systemctl", "daemon-reload"], check=False)
+        subprocess.run(["/usr/bin/systemctl", "enable", "openvpn-server@server"], check=False)
+        subprocess.run(["/usr/bin/systemctl", "restart", "openvpn-server@server"], check=False)
         
         return jsonify({"success": True, "message": "Bootstrap completed & OpenVPN started"})
     except Exception as e:
