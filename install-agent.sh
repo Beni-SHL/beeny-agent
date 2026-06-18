@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ─── رنگ‌ها ─────────────────────────────────────
+# ─── رنگ‌های اصلی ─────────────────────────────────
 C_RED='\033[0;31m'
 C_GREEN='\033[0;32m'
 C_CYAN='\033[0;36m'
@@ -10,10 +10,17 @@ C_NC='\033[0m'
 BOLD='\033[1m'
 BLINK='\033[5m'
 
-# ─── توابع انیمیشنی ────────────────────────────
+# ─── پاستیل‌های رنگین‌کمان برای BEENY ─────────────
+PASTEL_PINK='\033[38;2;255;179;186m'
+PASTEL_PEACH='\033[38;2;255;223;186m'
+PASTEL_YELLOW='\033[38;2;255;255;186m'
+PASTEL_MINT='\033[38;2;186;255;201m'
+PASTEL_LAVENDER='\033[38;2;186;225;255m'
+
+# ─── توابع انیمیشنی ──────────────────────────────
 spinner() {
     local pid=$1
-    local delay=0.1
+    local delay=0.08
     local spin='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
     while kill -0 $pid 2>/dev/null; do
         for ((i=0; i<${#spin}; i++)); do
@@ -46,7 +53,7 @@ typewriter() {
     echo
 }
 
-# ─── پاکسازی و بنر ──────────────────────────────
+# ─── پاکسازی و بنر ────────────────────────────────
 clear
 echo -e "${C_CYAN}${BOLD}"
 typewriter "  ____  ______ ______ _   _ __     __"
@@ -55,16 +62,20 @@ typewriter " | |_) | |__  | |__  |  \| | \ \_/ / "
 typewriter " |  _ <|  __| |  __| | . \` |  \   /  "
 typewriter " | |_) | |____| |____| |\  |   | |   "
 typewriter " |____/|______|______|_| \_|   |_|   ${C_NC}"
-echo -e "${C_PURPLE}${BOLD}${BLINK}✦✦✦ BEENY NODE AGENT AUTO-INSTALLER ✦✦✦${C_NC}\n"
+
+# خط ویژه با BEENY رنگین‌کمانی
+echo -e -n "${C_PURPLE}${BOLD}${BLINK}✦✦✦ ${C_NC}"
+echo -e -n "${PASTEL_PINK}B${PASTEL_PEACH}E${PASTEL_YELLOW}E${PASTEL_MINT}N${PASTEL_LAVENDER}Y"
+echo -e "${C_PURPLE}${BOLD}${BLINK} NODE AGENT AUTO-INSTALLER ✦✦✦${C_NC}\n"
 sleep 1
 
-# ─── بررسی روت ──────────────────────────────────
+# ─── بررسی روت ────────────────────────────────────
 if [ "$EUID" -ne 0 ]; then
     echo -e "${C_RED}❌ Error: Please run as root!${C_NC}"
     exit 1
 fi
 
-# ─── پرسش از کاربر ──────────────────────────────
+# ─── پرسش از کاربر ────────────────────────────────
 echo -e "${C_CYAN}╭────────────────────────────────────────────────────────╮${C_NC}"
 echo -e "${C_CYAN}│${C_NC} ${BOLD}Node Configuration Setup${C_NC}                               ${C_CYAN}│${C_NC}"
 echo -e "${C_CYAN}╰────────────────────────────────────────────────────────╯${C_NC}"
@@ -80,18 +91,22 @@ if [ -z "$USER_DOMAIN" ]; then
 else
     NODE_ADDRESS=$USER_DOMAIN
 fi
+
+# ─── تولید کلید API همینجا (نه داخل subshell) ─────
+API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+
 echo -e "\n${C_GREEN}✔ Configuration Saved. Starting Installation...${C_NC}\n"
 sleep 1
 
-# ─── مراحل نصب (۶ مرحله) ────────────────────────
+# ─── مراحل نصب (۶ مرحله) ─────────────────────────
 TOTAL_STEPS=6
 STEP=0
 
-# مرحله ۱: پیش‌نیازها
+# مرحله ۱
 ((STEP++))
 echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Installing Dependencies (OpenVPN, Python)..."
 progress_bar $STEP $TOTAL_STEPS
-echo
+echo ""   # برای تمیز شدن خط بعدی
 (
     export DEBIAN_FRONTEND=noninteractive
     apt-get remove -y needrestart > /dev/null 2>&1 || true
@@ -107,11 +122,11 @@ echo
 ) &
 spinner $!
 
-# مرحله ۲: شبکه و فایروال
+# مرحله ۲
 ((STEP++))
 echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Configuring Network Routing & Firewall..."
 progress_bar $STEP $TOTAL_STEPS
-echo
+echo ""
 (
     echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-beeny-vpn.conf
     sysctl -p /etc/sysctl.d/99-beeny-vpn.conf > /dev/null 2>&1
@@ -128,14 +143,13 @@ echo
 ) &
 spinner $!
 
-# مرحله ۳: تنظیم پوشه و کانفیگ
+# مرحله ۳
 ((STEP++))
 echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Setting up Directories & Config..."
 progress_bar $STEP $TOTAL_STEPS
-echo
+echo ""
 (
     mkdir -p /opt/beeny-agent
-    API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
     cat << EOF > /opt/beeny-agent/config.py
 AGENT_API_KEY = "$API_KEY"
 AGENT_PORT = $USER_PORT
@@ -144,11 +158,11 @@ EOF
 ) &
 spinner $!
 
-# مرحله ۴: نوشتن Agent
+# مرحله ۴
 ((STEP++))
 echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Writing Agent Script..."
 progress_bar $STEP $TOTAL_STEPS
-echo
+echo ""
 (
     cat << 'EOF' > /opt/beeny-agent/agent.py
 from flask import Flask, request, jsonify
@@ -218,11 +232,11 @@ EOF
 ) &
 spinner $!
 
-# مرحله ۵: راه‌اندازی سرویس
+# مرحله ۵
 ((STEP++))
 echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Starting Systemd Service..."
 progress_bar $STEP $TOTAL_STEPS
-echo
+echo ""
 (
     cat << 'EOF' > /etc/systemd/system/beeny-agent.service
 [Unit]
@@ -243,11 +257,11 @@ EOF
 ) &
 spinner $!
 
-# مرحله ۶: منوی مدیریت
+# مرحله ۶
 ((STEP++))
 echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Creating Node Manager Menu..."
 progress_bar $STEP $TOTAL_STEPS
-echo
+echo ""
 (
     cat << 'EOF' > /usr/local/bin/beeny
 #!/bin/bash
