@@ -106,7 +106,7 @@ STEP=0
 ((STEP++))
 echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Installing Dependencies (OpenVPN, Python)..."
 progress_bar $STEP $TOTAL_STEPS
-echo ""   # برای تمیز شدن خط بعدی
+echo ""
 (
     export DEBIAN_FRONTEND=noninteractive
     apt-get remove -y needrestart > /dev/null 2>&1 || true
@@ -257,35 +257,44 @@ EOF
 ) &
 spinner $!
 
-# مرحله ۶
+# مرحله ۶ (منوی مدیریت با گزینه Uninstall جدید)
 ((STEP++))
-echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Creating Node Manager Menu..."
+echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Creating Node Manager Menu (with Uninstall)..."
 progress_bar $STEP $TOTAL_STEPS
 echo ""
 (
-    cat << 'EOF' > /usr/local/bin/beeny
+    cat << 'MENUEOF' > /usr/local/bin/beeny
 #!/bin/bash
-clear
+C_RED='\033[0;31m'
+C_GREEN='\033[0;32m'
+C_CYAN='\033[0;36m'
+C_YELLOW='\033[1;33m'
+C_PURPLE='\033[0;35m'
+C_NC='\033[0m'
+BOLD='\033[1m'
+
 API=$(grep AGENT_API_KEY /opt/beeny-agent/config.py | cut -d'"' -f2)
 PORT=$(grep AGENT_PORT /opt/beeny-agent/config.py | cut -d'=' -f2 | tr -d ' ')
 HOST=$(grep AGENT_HOST /opt/beeny-agent/config.py | cut -d'"' -f2)
 
-echo -e "\033[0;36m====================================\033[0m"
-echo -e "\033[1m  🛡️  Beeny Node Agent Menu\033[0m"
-echo -e "\033[0;36m====================================\033[0m"
+clear
+echo -e "${C_CYAN}====================================${C_NC}"
+echo -e "${BOLD}  🛡️  Beeny Node Agent Menu${C_NC}"
+echo -e "${C_CYAN}====================================${C_NC}"
 echo -e "1. 🔑 Show Connection Info (API Key)"
 echo -e "2. 🔌 Change Port"
 echo -e "3. 🌐 Change Domain/IP"
 echo -e "4. 🔄 Restart Agent Service"
-echo -e "5. ❌ Exit"
+echo -e "5. 🗑️  Uninstall Beeny Agent (remove all files)"
+echo -e "6. ❌ Exit"
 echo -e "------------------------------------"
-read -p "Select an option [1-5]: " opt
+read -p "Select an option [1-6]: " opt
 
 case $opt in
     1)
-        echo -e "\n\033[0;32mAddress  :\033[0m $HOST"
-        echo -e "\033[0;32mPort     :\033[0m $PORT"
-        echo -e "\033[0;32mAPI Key  :\033[0m $API\n"
+        echo -e "\n${C_GREEN}Address  :${C_NC} $HOST"
+        echo -e "${C_GREEN}Port     :${C_NC} $PORT"
+        echo -e "${C_GREEN}API Key  :${C_NC} $API\n"
         ;;
     2)
         read -p "Enter new port: " newp
@@ -293,21 +302,58 @@ case $opt in
         iptables -I INPUT -p tcp --dport "$newp" -j ACCEPT || true
         netfilter-persistent save > /dev/null 2>&1 || true
         systemctl restart beeny-agent
-        echo -e "\033[0;32m✔ Port changed to $newp and service restarted!\033[0m"
+        echo -e "${C_GREEN}✔ Port changed to $newp and service restarted!${C_NC}"
         ;;
     3)
         read -p "Enter new Domain/IP: " newd
         sed -i "s/AGENT_HOST = .*/AGENT_HOST = \"$newd\"/" /opt/beeny-agent/config.py
-        echo -e "\033[0;32m✔ Domain updated! (Change it in Master Panel as well)\033[0m"
+        echo -e "${C_GREEN}✔ Domain updated! (Change it in Master Panel as well)${C_NC}"
         ;;
     4)
         systemctl restart beeny-agent
-        echo -e "\033[0;32m✔ Agent Restarted Successfully!\033[0m"
+        echo -e "${C_GREEN}✔ Agent Restarted Successfully!${C_NC}"
         ;;
-    5) exit 0 ;;
-    *) echo "Invalid option" ;;
+    5)
+        echo -e "${C_RED}⚠️  WARNING: This will completely remove Beeny Agent and all its files!${C_NC}"
+        read -p "Are you sure you want to continue? (yes/no): " confirm
+        if [ "$confirm" != "yes" ]; then
+            echo -e "${C_YELLOW}Uninstall cancelled.${C_NC}"
+            exit 0
+        fi
+        
+        echo -e "${C_YELLOW}🛑 Stopping and disabling beeny-agent service...${C_NC}"
+        systemctl stop beeny-agent 2>/dev/null
+        systemctl disable beeny-agent 2>/dev/null
+        rm -f /etc/systemd/system/beeny-agent.service
+        systemctl daemon-reload
+        
+        echo -e "${C_YELLOW}🗑️  Removing agent files...${C_NC}"
+        rm -rf /opt/beeny-agent
+        
+        echo -e "${C_YELLOW}🧹 Removing VPN sysctl config...${C_NC}"
+        rm -f /etc/sysctl.d/99-beeny-vpn.conf
+        sysctl -p > /dev/null 2>&1
+        
+        echo -e "${C_YELLOW}🔧 Removing firewall rules (if possible)...${C_NC}"
+        # سعی می‌کنیم قانون مربوط به پورت را حذف کنیم
+        if [ -n "$PORT" ]; then
+            iptables -D INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || true
+        fi
+        netfilter-persistent save > /dev/null 2>&1 || true
+        
+        echo -e "${C_YELLOW}🗑️  Deleting this menu...${C_NC}"
+        rm -f /usr/local/bin/beeny
+        
+        echo -e "${C_GREEN}✅ Beeny Node Agent has been completely removed.${C_NC}"
+        ;;
+    6) 
+        exit 0 
+        ;;
+    *) 
+        echo -e "${C_RED}Invalid option${C_NC}" 
+        ;;
 esac
-EOF
+MENUEOF
     chmod +x /usr/local/bin/beeny
 ) &
 spinner $!
