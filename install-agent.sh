@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# ─── رنگ‌های اصلی ─────────────────────────────────
+# ─── رنگ‌ها ─────────────────────────────────────
 C_RED='\033[0;31m'
 C_GREEN='\033[0;32m'
 C_CYAN='\033[0;36m'
@@ -92,7 +92,7 @@ else
     NODE_ADDRESS=$USER_DOMAIN
 fi
 
-# ─── تولید کلید API همینجا (نه داخل subshell) ─────
+# ─── تولید کلید API همینجا ────────────────────────
 API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
 
 echo -e "\n${C_GREEN}✔ Configuration Saved. Starting Installation...${C_NC}\n"
@@ -158,9 +158,9 @@ EOF
 ) &
 spinner $!
 
-# مرحله ۴
+# ─── مرحله ۴ (ایجنت با اصلاح نام سرویس OpenVPN) ───
 ((STEP++))
-echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Writing Agent Script..."
+echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Writing Agent Script (fixed for openvpn-server@server)..."
 progress_bar $STEP $TOTAL_STEPS
 echo ""
 (
@@ -205,9 +205,10 @@ def bootstrap_openvpn():
         if data.get("server_conf"):
             with open("/etc/openvpn/server/server.conf", "w") as f: f.write(data.get("server_conf"))
         
+        # 🔥 اصلاح: استفاده از نام درست سرویس
         subprocess.run(["systemctl", "daemon-reload"], check=False)
-        subprocess.run(["systemctl", "enable", "openvpn@server"], check=False)
-        subprocess.run(["systemctl", "restart", "openvpn@server"], check=False)
+        subprocess.run(["systemctl", "enable", "openvpn-server@server"], check=False)
+        subprocess.run(["systemctl", "restart", "openvpn-server@server"], check=False)
         return jsonify({"success": True, "message": "Bootstrap completed"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -232,13 +233,14 @@ EOF
 ) &
 spinner $!
 
-# مرحله ۵
+# ─── مرحله ۵ (با اصلاح نام سرویس در Watcher) ─────
 ((STEP++))
-echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Starting Systemd Service..."
+echo -ne "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Starting Systemd Service & Configuration Watcher..."
 progress_bar $STEP $TOTAL_STEPS
 echo ""
 (
-    cat << 'EOF' > /etc/systemd/system/beeny-agent.service
+# سرویس اصلی ایجنت
+cat << 'EOF' > /etc/systemd/system/beeny-agent.service
 [Unit]
 Description=Beeny Node Agent
 After=network.target
@@ -252,12 +254,36 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 EOF
-    systemctl daemon-reload > /dev/null 2>&1
-    systemctl enable --now beeny-agent > /dev/null 2>&1
+
+# ناظر تغییرات server.conf
+cat << 'EOF' > /etc/systemd/system/openvpn-watcher.path
+[Unit]
+Description=Watch OpenVPN Server Config for Changes
+
+[Path]
+PathChanged=/etc/openvpn/server/server.conf
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# اکشن ناظر (حالا با نام درست سرویس)
+cat << 'EOF' > /etc/systemd/system/openvpn-watcher.service
+[Unit]
+Description=Restart OpenVPN on Config Change
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/systemctl restart openvpn-server@server
+EOF
+
+systemctl daemon-reload > /dev/null 2>&1
+systemctl enable --now beeny-agent > /dev/null 2>&1
+systemctl enable --now openvpn-watcher.path > /dev/null 2>&1
 ) &
 spinner $!
 
-# مرحله ۶ (منوی مدیریت با گزینه Uninstall جدید)
+# ─── مرحله ۶ (منو با Uninstall) ──────────────────
 ((STEP++))
 echo -e "${BOLD}${C_CYAN}➜ [${STEP}/${TOTAL_STEPS}]${C_NC} Creating Node Manager Menu (with Uninstall)..."
 progress_bar $STEP $TOTAL_STEPS
@@ -321,10 +347,14 @@ case $opt in
             exit 0
         fi
         
-        echo -e "${C_YELLOW}🛑 Stopping and disabling beeny-agent service...${C_NC}"
+        echo -e "${C_YELLOW}🛑 Stopping and disabling services...${C_NC}"
         systemctl stop beeny-agent 2>/dev/null
         systemctl disable beeny-agent 2>/dev/null
+        systemctl stop openvpn-watcher.path 2>/dev/null
+        systemctl disable openvpn-watcher.path 2>/dev/null
         rm -f /etc/systemd/system/beeny-agent.service
+        rm -f /etc/systemd/system/openvpn-watcher.path
+        rm -f /etc/systemd/system/openvpn-watcher.service
         systemctl daemon-reload
         
         echo -e "${C_YELLOW}🗑️  Removing agent files...${C_NC}"
@@ -335,7 +365,6 @@ case $opt in
         sysctl -p > /dev/null 2>&1
         
         echo -e "${C_YELLOW}🔧 Removing firewall rules (if possible)...${C_NC}"
-        # سعی می‌کنیم قانون مربوط به پورت را حذف کنیم
         if [ -n "$PORT" ]; then
             iptables -D INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null || true
         fi
