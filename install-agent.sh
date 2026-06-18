@@ -45,39 +45,38 @@ echo -ne "${C_YELLOW}➜ [1/6] Installing Dependencies (OpenVPN, Python)... ${C_
 export DEBIAN_FRONTEND=noninteractive
 apt-get remove -y needrestart > /dev/null 2>&1 || true
 apt-get update -y > /dev/null 2>&1
+
+# ساخت پیش‌دستانه پوشه‌ها و فایل خالی برای دور زدن باگ نصب apt
+mkdir -p /etc/openvpn/server /etc/openvpn/ccd /etc/openvpn/users
+touch /etc/openvpn/server/server.conf
+
 echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections 2>/dev/null || true
 echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections 2>/dev/null || true
+
+# نصب پکیج‌ها (حالا بدون خطا نصب کامل میشه)
 apt-get install -y -q -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" openvpn python3 python3-pip iptables iptables-persistent net-tools curl > /dev/null 2>&1
 pip3 install flask requests --break-system-packages > /dev/null 2>&1 || pip3 install flask requests > /dev/null 2>&1
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
 echo -ne "${C_YELLOW}➜ [2/6] Configuring Network Routing & Firewall... ${C_NC}"
-# فعال‌سازی فورواردینگ (مغز لینوکس)
 echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-beeny-vpn.conf
 sysctl -p /etc/sysctl.d/99-beeny-vpn.conf > /dev/null 2>&1
 
 INTERFACE=$(ip route | grep default | awk '{print $5}' | head -n 1)
 if [ -n "$INTERFACE" ]; then
-    # پاکسازی رول‌های مزاحم احتمالی
     iptables -t nat -F POSTROUTING || true
-    
-    # مسیردهی اینترنت برای تونل (همون خطی که تو OVH مشکل داشت و درستش کردیم)
     iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o "$INTERFACE" -j MASQUERADE || true
-    
-    # باز کردن بی‌قیدوشرط مسیر فورواردینگ برای جلوگیری از گیر کردن پکت‌ها
     iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT || true
     iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT || true
 fi
 
-# باز کردن پورت اختصاصی ایجنت که کاربر وارد کرده
 iptables -I INPUT -p tcp --dport "$USER_PORT" -j ACCEPT || true
-
 iptables-save > /etc/iptables/rules.v4 || true
 netfilter-persistent save > /dev/null 2>&1 || true
 echo -e "${C_GREEN}✔ Done${C_NC}"
 
 echo -ne "${C_YELLOW}➜ [3/6] Setting up Directories & Config... ${C_NC}"
-mkdir -p /opt/beeny-agent /etc/openvpn/server /etc/openvpn/users
+mkdir -p /opt/beeny-agent
 API_KEY=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
 
 cat << EOF > /opt/beeny-agent/config.py
@@ -112,6 +111,8 @@ def bootstrap_openvpn():
     data = request.get_json()
     try:
         os.makedirs("/etc/openvpn/server", exist_ok=True)
+        os.makedirs("/etc/openvpn/ccd", exist_ok=True)
+        
         if data.get("ca_crt"):
             with open("/etc/openvpn/ca.crt", "w") as f: f.write(data.get("ca_crt"))
         if data.get("ta_key"):
@@ -120,10 +121,16 @@ def bootstrap_openvpn():
             with open("/etc/openvpn/server/server.crt", "w") as f: f.write(data.get("server_crt"))
         if data.get("server_key"):
             with open("/etc/openvpn/server/server.key", "w") as f: f.write(data.get("server_key"))
+        if data.get("dh_pem"):
+            with open("/etc/openvpn/dh.pem", "w") as f: f.write(data.get("dh_pem"))
+        if data.get("crl_pem"):
+            with open("/etc/openvpn/crl.pem", "w") as f: f.write(data.get("crl_pem"))
         if data.get("server_conf"):
             with open("/etc/openvpn/server/server.conf", "w") as f: f.write(data.get("server_conf"))
         
-        subprocess.run(["systemctl", "restart", "openvpn-server@server"], check=False)
+        subprocess.run(["systemctl", "daemon-reload"], check=False)
+        subprocess.run(["systemctl", "enable", "openvpn@server"], check=False)
+        subprocess.run(["systemctl", "restart", "openvpn@server"], check=False)
         return jsonify({"success": True, "message": "Bootstrap completed"})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -194,11 +201,8 @@ case $opt in
     2)
         read -p "Enter new port: " newp
         sed -i "s/AGENT_PORT = .*/AGENT_PORT = $newp/" /opt/beeny-agent/config.py
-        
-        # باز کردن پورت جدید در فایروال
         iptables -I INPUT -p tcp --dport "$newp" -j ACCEPT || true
         netfilter-persistent save > /dev/null 2>&1 || true
-        
         systemctl restart beeny-agent
         echo -e "\033[0;32m✔ Port changed to $newp and service restarted!\033[0m"
         ;;
@@ -225,4 +229,4 @@ echo -e "${C_CYAN}│${C_NC}  ${BOLD}Address    :${C_NC} ${C_YELLOW}$NODE_ADDRES
 echo -e "${C_CYAN}│${C_NC}  ${BOLD}Port       :${C_NC} $USER_PORT                                     ${C_CYAN}│${C_NC}"
 echo -e "${C_CYAN}│${C_NC}  ${BOLD}API Key    :${C_NC} ${C_GREEN}$API_KEY${C_NC} ${C_CYAN}│${C_NC}"
 echo -e "${C_CYAN}╰────────────────────────────────────────────────────────╯${C_NC}"
-echo -e "${C_YELLOW}💡 Tip: Type ${BOLD}'beeny'${C_NC}${C_YELLOW} anytime in this terminal to open the manager menu.${C_NC}\n"
+echo -e "${=C_YELLOW}💡 Tip: Type ${BOLD}'beeny'${C_NC}${C_YELLOW} anytime in this terminal to open the manager menu.${C_NC}\n"
